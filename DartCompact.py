@@ -1,48 +1,64 @@
-def start_game():
-    print("🎯 Welcome on DartCompact!")
-if __name__ == "__main__":
-    start_game()
+import streamlit as st
+import pandas as pd
 
-def throw_dart(current_score, throw_points):
-    if current_score - throw_points < 0:
-        print("Overshoot! Score stays the same.")
-        return current_score
-    return current_score - throw_points
+st.set_page_config(page_title="DartCompact 🎯", layout="centered")
 
-# Starting score for both players
-player1_score = 301
-player2_score = 301
+st.title("🎯 DartCompact")
+st.write("Welcome to the compact dart game for multiple players!")
 
-# Define the number of player with their name
-num_players = int(input("Number of players: "))
-players = []
-for i in range(num_players):
-    name = input(f"Enter name for player {i + 1}: ")
-    players.append({"name": name, "score": 301})
+# Initialize players
+if "players" not in st.session_state:
+    st.session_state.players = []
+    st.session_state.scores = {}
+    st.session_state.winner = None
+    st.session_state.game_started = False
 
-#Game loop 
-winner = None
-while not winner:
-    for player in players:
-        print(f"\n{player['name']}'s turn. Current score: {player['score']}")
-        try:
-            points = int(input("Enter points scored: "))
-        except ValueError:
-            print("Invalid input. Try again.")
-            continue
-        player['score'] = throw_dart(player['score'], points)
-        print(f"{player['name']}'s new score: {player['score']}")
-        if player['score'] == 0:
-            winner = player['name']
-            print(f"\n🏆 {winner} wins the game!")
-            break
+if not st.session_state.game_started:
+    num_players = st.number_input("Number of players", min_value=1, max_value=8, step=1)
+    player_names = []
 
-# Save scores
-with open(filename, "w") as file:
-    file.write("Darts Game Results:\n")
-    for player in players:
-        file.write(f"{player['name']}: {player['score']}\n")
-    file.write(f"Winner: {winner}\n")
-    file.write("-" * 30 + "\n")
+    for i in range(num_players):
+        name = st.text_input(f"Name of Player {i+1}", key=f"name_{i}")
+        player_names.append(name)
 
-print(f"\n✅ Scores saved to '{filename}'")
+    if st.button("Start Game"):
+        if all(name.strip() != "" for name in player_names):
+            st.session_state.players = player_names
+            st.session_state.scores = {name: 301 for name in player_names}
+            st.session_state.turn = 0
+            st.session_state.game_started = True
+        else:
+            st.warning("Please fill in all player names.")
+
+else:
+    if st.session_state.winner:
+        st.success(f"🏆 {st.session_state.winner} has won the game!")
+    else:
+        current_player = st.session_state.players[st.session_state.turn]
+        st.subheader(f"{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}")
+
+        points = st.number_input("Enter points", min_value=0, max_value=180, step=1, key="throw_points")
+
+        if st.button("Confirm Throw"):
+            new_score = st.session_state.scores[current_player] - points
+            if new_score < 0:
+                st.info("Overshoot! Score remains the same.")
+            else:
+                st.session_state.scores[current_player] = new_score
+                if new_score == 0:
+                    st.session_state.winner = current_player
+            st.session_state.turn = (st.session_state.turn + 1) % len(st.session_state.players)
+
+    st.write("### Scores")
+    score_df = pd.DataFrame({
+        "Players": list(st.session_state.scores.keys()),
+        "Points": list(st.session_state.scores.values())
+    })
+    st.dataframe(score_df)
+
+    st.line_chart(score_df.set_index("Players"))
+
+# Restart option
+if st.button("Restart"):
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
