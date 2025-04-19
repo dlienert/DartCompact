@@ -23,9 +23,12 @@ if not st.session_state.game_started:
         player_names.append(name)
 
     avatars = {}
+    options = ["confused", "funny", "dizzy", "sad", "angry", "handsome"]
     for name in player_names:
-        seed = st.text_input(f"Avatar keyword for {name}", key=f"avatar_{name}", value=name)
-        avatars[name] = f"https://api.dicebear.com/7.x/adventurer/svg?seed={seed}"
+        avatar_choice = st.radio(f"Choose avatar for {name}", options=options, horizontal=True, key=f"avatar_choice_{name}")
+        avatar_url = f"https://api.dicebear.com/7.x/adventurer/svg?seed={avatar_choice}_{name}"
+        st.image(avatar_url, width=100)
+        avatars[name] = avatar_url
     st.session_state.avatars = avatars
 
     if st.button("Start Game"):
@@ -71,9 +74,8 @@ else:
         st.image(st.session_state.avatars[current_player], width=100, caption=f"{current_player}'s Avatar")
         st.subheader(f"{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}")
 
-        st.write("### Select Your Throw")
-        base_score = st.selectbox("Base Score", [i for i in range(1, 21)] + [25, 50])
-        multiplier = st.radio("Multiplier", ["Single", "Double", "Triple"], horizontal=True)
+        base_score = st.selectbox("Base Score", [i for i in range(1, 21)] + [25, 50], key="base_score")
+        multiplier = st.radio("Multiplier", ["Single", "Double", "Triple"], horizontal=True, key="multiplier")
 
         if st.button("Confirm Throw"):
             if base_score in [25, 50] and multiplier in ["Double", "Triple"]:
