@@ -16,10 +16,17 @@ if "players" not in st.session_state:
 if not st.session_state.game_started:
     num_players = st.number_input("Number of players", min_value=1, max_value=8, step=1)
     player_names = []
+    require_double_out = st.checkbox("Require double to win (Double Out Rule)", value=True)
 
     for i in range(num_players):
         name = st.text_input(f"Name of Player {i+1}", key=f"name_{i}")
         player_names.append(name)
+
+    avatars = {}
+    for name in player_names:
+        seed = st.text_input(f"Avatar keyword for {name}", key=f"avatar_{name}", value=name)
+        avatars[name] = f"https://api.dicebear.com/7.x/adventurer/svg?seed={seed}"
+    st.session_state.avatars = avatars
 
     if st.button("Start Game"):
         if all(name.strip() != "" for name in player_names):
@@ -27,6 +34,7 @@ if not st.session_state.game_started:
             st.session_state.scores = {name: 301 for name in player_names}
             st.session_state.turn = 0
             st.session_state.game_started = True
+            st.session_state.require_double_out = require_double_out
         else:
             st.warning("Please fill in all player names.")
 
@@ -60,25 +68,40 @@ else:
         st.bar_chart(stats_df["Max Points"])
     else:
         current_player = st.session_state.players[st.session_state.turn]
+        st.image(st.session_state.avatars[current_player], width=100, caption=f"{current_player}'s Avatar")
         st.subheader(f"{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}")
 
-        points = st.number_input("Enter points", min_value=0, max_value=180, step=1, key="throw_points")
+        st.write("### Select Your Throw")
+        base_score = st.selectbox("Base Score", [i for i in range(1, 21)] + [25, 50])
+        multiplier = st.radio("Multiplier", ["Single", "Double", "Triple"], horizontal=True)
 
         if st.button("Confirm Throw"):
+            if base_score in [25, 50] and multiplier in ["Double", "Triple"]:
+                st.info("Double or Triple is not allowed on 25 or 50. Defaulting to Single.")
+                multiplier = "Single"
+
+            if multiplier == "Single":
+                points = base_score
+            elif multiplier == "Double":
+                points = base_score * 2
+            else:
+                points = base_score * 3
+
             new_score = st.session_state.scores[current_player] - points
             if new_score < 0:
                 st.info("Overshoot! Score remains the same.")
             else:
                 st.session_state.scores[current_player] = new_score
                 if new_score == 0:
-                    st.session_state.winner = current_player
+                    if st.session_state.require_double_out and multiplier != "Double":
+                        st.info("You need to finish on a Double to win!")
+                    else:
+                        st.session_state.winner = current_player
                 # Record the throw
                 if "throws" not in st.session_state:
                     st.session_state.throws = {name: [] for name in st.session_state.players}
                 st.session_state.throws[current_player].append(points)
             st.session_state.turn = (st.session_state.turn + 1) % len(st.session_state.players)
-
-    
 
 # Restart option
 if st.button("Restart"):
