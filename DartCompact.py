@@ -59,21 +59,28 @@ else:
         st.success(f"🏆 {st.session_state.winner} has won the game!")
 
         # Create final ranking sorted by remaining score
-        ranking = sorted(st.session_state.players, key=lambda p: (p != st.session_state.winner, st.session_state.scores[p]))
+        winner = st.session_state.winner
+        others = [p for p in st.session_state.players if p != winner]
+        others_sorted = sorted(others, key=lambda p: st.session_state.scores[p])
+        ranking = [winner] + others_sorted
 
         st.markdown("## 🏅 Final Standings")
+        # Podium-style layout
+        podium_cols = st.columns([1, 1, 1])
+        podium_order = [1, 0, 2]  # Show 2nd, 1st, 3rd left to right
 
-        # Show podium-style layout
-        cols = st.columns([1, 1, 1])
-        positions = ["2nd", "1st", "3rd"]
-
-        for i, col_index in enumerate([0, 1, 2]):
-            if i < len(ranking):
-                player = ranking[i if i != 2 else 2]  # place third if exists
-                with cols[col_index]:
-                    st.markdown(f"### {positions[i]}")
-                    st.image(st.session_state.avatars[player], width=120)
-                    st.markdown(f"**{player}**")
+        for idx, pos in enumerate(podium_order):
+            if pos < len(ranking):
+                player = ranking[pos]
+                with podium_cols[idx]:
+                    if pos == 0:
+                        st.markdown("🥈 **2nd Place**")
+                    elif pos == 1:
+                        st.markdown("🥇 **1st Place**")
+                    elif pos == 2:
+                        st.markdown("🥉 **3rd Place**")
+                    st.image(st.session_state.avatars[player], width=100)
+                    st.markdown(f"### {player}")
 
         # Statistics below podium
         st.write("## 📊 Game Statistics")
@@ -104,17 +111,14 @@ else:
             response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                # Pro avg currently mocked because statistics not included in trial competitor profile
-                pro_avg = 98.5
-                pro_max = 180
+                # Attempt to extract actual stats if available in response
+                stats = data.get("statistics", {})
+                pro_avg = stats.get("average_3_dart_score", 98.5)
+                pro_max = stats.get("best_3_dart_score", 180)
             else:
                 st.warning("Couldn't fetch pro data, using defaults.")
-                pro_avg = 98.5
-                pro_max = 180
         except Exception as e:
             st.error("API call failed.")
-            pro_avg = 98.5
-            pro_max = 180
  
         for player, throws in st.session_state.throws.items():
             user_avg = sum(throws)/len(throws) if throws else 0
@@ -147,43 +151,65 @@ else:
             st.session_state.pop(f"multiplier_{current_player}", None)
             st.session_state.last_turn = st.session_state.turn
             st.session_state.has_thrown = False
+            if "throw_count" not in st.session_state:
+                st.session_state.throw_count = 0
 
         # Throw confirmation logic
-        if not st.session_state.has_thrown:
-            base_score_key = f"base_score_{current_player}"
-            multiplier_key = f"multiplier_{current_player}"
-            base_score = st.selectbox("Base Score", [i for i in range(1, 21)] + [25, 50], key=base_score_key)  # Base score input
-            multiplier = st.radio("Multiplier", ["Single", "Double", "Triple"], horizontal=True, key=multiplier_key)  # Multiplier input
+        with st.form(key=f"{current_player}_throw_form_{st.session_state.throw_count}", clear_on_submit=True):
+            base_score = st.selectbox(
+                "Base Score",
+                [i for i in range(1, 21)] + [25, 50],
+                key=f"base_score_{current_player}_{st.session_state.throw_count}"
+            )
+            multiplier = st.radio(
+                "Multiplier",
+                ["Single", "Double", "Triple"],
+                horizontal=True,
+                key=f"multiplier_{current_player}_{st.session_state.throw_count}"
+            )
+            submitted = st.form_submit_button("Confirm Throw")
 
-            # Confirm throw button
-            if st.button("Confirm Throw"):
-                # Validate score rules
-                if base_score in [25, 50] and multiplier in ["Double", "Triple"]:
-                    st.info("Double or Triple is not allowed on 25 or 50. Defaulting to Single.")
-                    multiplier = "Single"
+        if submitted and not st.session_state.has_thrown:
+            # Validate score rules
+            if base_score in [25, 50] and multiplier in ["Double", "Triple"]:
+                st.info("Double or Triple is not allowed on 25 or 50. Defaulting to Single.")
+                multiplier = "Single"
 
-                # Calculate points
-                points = base_score if multiplier == "Single" else base_score * 2 if multiplier == "Double" else base_score * 3
+            # Calculate points
+            points = base_score
+            if multiplier == "Double":
+                points *= 2
+            elif multiplier == "Triple":
+                points *= 3
 
-                # Update score and check for overshoot
-                new_score = st.session_state.scores[current_player] - points
-                if new_score < 0:
-                    st.info("Overshoot! Score remains the same.")
+            # Update score and handle overshoot or win
+            current_score = st.session_state.scores[current_player]
+            new_score = current_score - points
+
+            if new_score < 0:
+                st.info("Overshoot! Score remains the same.")
+            elif new_score == 0:
+                if st.session_state.require_double_out and multiplier != "Double":
+                    st.info("You need to finish on a Double to win!")
                 else:
-                    st.session_state.scores[current_player] = new_score  # Update score
-                    # Check for winning condition
-                    if new_score == 0:
-                        if st.session_state.require_double_out and multiplier != "Double":
-                            st.info("You need to finish on a Double to win!")  # Validate win condition
-                        else:
-                            st.session_state.winner = current_player  # Declare winner
-                    st.session_state.throws[current_player].append(points)  # Track points
-                    st.session_state.has_thrown = True  # Mark thrown
+                    st.session_state.scores[current_player] = 0
+                    st.session_state.winner = current_player
+                    st.session_state.throws[current_player].append(points)
+                    st.session_state.has_thrown = True
+                    st.stop()
+            else:
+                st.session_state.scores[current_player] = new_score
+                st.session_state.throws[current_player].append(points)
+                st.session_state.throw_count += 1
+                if st.session_state.throw_count >= 3:
+                    st.session_state.has_thrown = True
+
         # Turn switching logic
         if st.session_state.has_thrown:
             if st.button("Next Turn"):
                 st.session_state.turn = (st.session_state.turn + 1) % len(st.session_state.players)  # Next player
                 st.session_state.has_thrown = False  # Reset throw status
+                st.session_state.throw_count = 0
                 current_player = st.session_state.players[st.session_state.turn]
                 st.session_state.pop(f"base_score_{current_player}", None)  # Clear selections
                 st.session_state.pop(f"multiplier_{current_player}", None)
