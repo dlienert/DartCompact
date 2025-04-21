@@ -2,7 +2,7 @@
 
 from utils import save_results
 
-# === Logique de jeu ===
+# === Logic of the game ===
 def create_players(players_names):
     return [{"name": name, "score": 301, "history": [], "victories": 0} for name in players_names]
 
@@ -10,16 +10,16 @@ def process_turn(player, throws):
     total_score = sum(throws)
     new_score = player['score'] - total_score
 
-    # ✅ Ajout des lancers dans l'historique
+    # ✅ Add throws in historic 
     player['history'].append(throws)
 
     if new_score < 0:
-        message = "Bust! Vous avez dépassé votre score."
-        new_score = player['score']  # Score reste le même si bust
+        message = "Bust! You overpassed your score."
+        new_score = player['score']  #Score stays the same if Bust
         game_over = False
     else:
         message = f"Score restant : {new_score} points"
-        game_over = new_score == 0  # Le joueur gagne si score == 0
+        game_over = new_score == 0  #Player wins if score == 0
 
     player['score'] = new_score
     return game_over, new_score, message
