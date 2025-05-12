@@ -24,6 +24,10 @@ def process_turn(player, throws):
     total_score = sum(throws)
     new_score = player['score'] - total_score
 
+    # ML process (Initialising ML data)
+    if 'ml_data' not in st.session_state:
+        st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    
     # ✅ Add throws in historic 
     player['history'].append(throws)
 
@@ -104,10 +108,46 @@ else:
     if "has_thrown" not in st.session_state:
         st.session_state.has_thrown = False
 
+    #ML process (Data added after each run)
+    player = st.session_state.players[st.session_state.current_player]
+    # Just after updating player[‘score’] and player[‘history’].
+    player_data = {
+        'player': player['name'],
+        'avg_throw': sum(player['history']) / len(player['history']) if player['history'] else 0,
+        'total_throws': len(player['history']),
+        'current_score': player['score'],
+        'max_throw': max(player['history']) if player['history'] else 0,
+        'won': 1 if player['score'] == 0 else 0
+    }
+    st.session_state.ml_data = pd.concat([st.session_state.ml_data, pd.DataFrame([player_data])], ignore_index=True)
+
+    #ML process (Prediction display)
+    if 'ml_model' in st.session_state:
+        player = st.session_state.players[st.session_state.current_player]
+        x_pred = pd.DataFrame([{
+            'avg_throw': sum(player['history']) / len(player['history']) if player['history'] else 0,
+            'total_throws': len(player['history']),
+            'current_score': player['score'],
+            'max_throw': max(player['history']) if player['history'] else 0,
+        }])
+        proba = st.session_state.ml_model.predict_proba(x_pred)[0][1]
+        st.markdown(f"### 🤖 Chance estimée de victoire : **{proba*100:.1f}%**")
+
     # Game over logic
     if st.session_state.winner:
         st.success(f"🏆 {st.session_state.winner} has won the game!")
 
+        #ML Process (Training the model at the end of the game)
+        from sklearn.linear_model import LogisticRegression
+
+        df = st.session_state.ml_data
+        if df['won'].sum() >= 2:  # We train the model only if we have to completed games 
+            X = df[['avg_throw', 'total_throws', 'current_score', 'max_throw']]
+            y = df['won']
+            model = LogisticRegression()
+            model.fit(X, y)
+            st.session_state.ml_model = model
+        
         # Create final ranking sorted by remaining score
         winner = st.session_state.winner
         others = [p for p in st.session_state.players if p != winner]
