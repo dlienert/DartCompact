@@ -32,7 +32,7 @@ def process_turn(player, throws):
         new_score = player['score']  #Score stays the same if Bust
         game_over = False
     else:
-        message = f"Score restant : {new_score} points"
+        message = f"Remaining score: {new_score} points"
         game_over = new_score == 0  #Player wins if score == 0
 
     player['score'] = new_score
