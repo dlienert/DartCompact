@@ -42,6 +42,8 @@ def process_turn(player, throws):
     player['score'] = new_score
     return game_over, new_score, message
 
+def save_results(players, winner_name):
+    pass  # Implements backup if required
 
 def handle_win(players, winner_name):
     save_results(players, winner_name)
@@ -107,7 +109,6 @@ else:
     # Initialize throw tracking
     if "has_thrown" not in st.session_state:
         st.session_state.has_thrown = False
-    player_name = st.session_state.players[st.session_state.turn]
 
     #ML process (Data added after each run)
     player_name = st.session_state.players[st.session_state.turn]
@@ -151,12 +152,14 @@ else:
         from sklearn.linear_model import LogisticRegression
 
         df = st.session_state.ml_data
-        if df['won'].sum() >= 2:  # We train the model only if we have to completed games 
-            X = df[['avg_throw', 'total_throws', 'current_score', 'max_throw']]
-            y = df['won']
-            model = LogisticRegression()
-            model.fit(X, y)
-            st.session_state.ml_model = model
+        expected_cols = ['avg_throw', 'total_throws', 'current_score', 'max_throw']
+        if all(col in df.columns for col in expected_cols):
+             X = df[expected_cols]
+             y = df['won']
+             model = LogisticRegression()
+             model.fit(X, y)
+             st.session_state.ml_model = model
+
         
         # Create final ranking sorted by remaining score
         winner = st.session_state.winner
@@ -320,7 +323,8 @@ else:
 # Restart behavior
 if st.button("Restart"):
     for key in list(st.session_state.keys()):
-        del st.session_state[key]  # Clear session state to restart the game
-    st.rerun()  # ChatGPT fix: immediately refresh UI after restart
+        del st.session_state[key]
+    st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    st.rerun()
 
 # dart_compact.py end
