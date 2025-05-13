@@ -5,6 +5,7 @@ import streamlit as st
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 import numpy as np
+import requests
 st.set_page_config(page_title="DartCompact 🎯", layout="centered")
 
 # Create the sidebar for ML model information first so it's always visible
@@ -155,29 +156,6 @@ with st.sidebar:
                         # Display scenario probabilities
                         scenario_df = pd.DataFrame(scenario_probs, columns=['Scenario', 'Win Probability'])
                         st.bar_chart(scenario_df.set_index('Scenario'))
-                
-            # Feature importance
-            if hasattr(st.session_state.ml_model, 'coef_'):
-                features = ['avg_throw', 'total_throws', 'current_score', 'max_throw']
-                coefs = st.session_state.ml_model.coef_[0]
-                importance = pd.DataFrame({
-                    'Feature': features,
-                    'Importance': np.abs(coefs)
-                }).sort_values('Importance', ascending=False)
-                
-                st.write("### Feature Importance")
-                st.bar_chart(importance.set_index('Feature'))
-                
-                # Most important factor explanation
-                most_important = importance.iloc[0]['Feature']
-                if most_important == 'avg_throw':
-                    st.write("💡 Your average points per throw is the most predictive factor!")
-                elif most_important == 'current_score':
-                    st.write("💡 Your current score is the most predictive factor!")
-                elif most_important == 'total_throws':
-                    st.write("💡 The number of throws is the most predictive factor!")
-                elif most_important == 'max_throw':
-                    st.write("💡 Your maximum throw value is the most predictive factor!")
         except Exception as e:
             st.warning(f"Could not generate prediction: {str(e)}")
             st.write("Exception details:", e)
@@ -481,38 +459,9 @@ else:
                 prob_df = pd.DataFrame(win_probs, columns=['Player', 'Win Probability'])
                 st.bar_chart(prob_df.set_index('Player'))
             
-            # Show feature importance
-            if hasattr(st.session_state.ml_model, 'coef_'):
-                st.write("### What Makes a Winner?")
-                features = ['avg_throw', 'total_throws', 'current_score', 'max_throw']
-                feature_names = ['Average Points', 'Number of Throws', 'Current Score', 'Max Throw']
-                coefs = st.session_state.ml_model.coef_[0]
-                importance = pd.DataFrame({
-                    'Feature': feature_names,
-                    'Importance': np.abs(coefs)
-                }).sort_values('Importance', ascending=False)
-                
-                st.bar_chart(importance.set_index('Feature'))
-                
-                # Most important factor explanation
-                most_important_idx = np.argmax(np.abs(coefs))
-                most_important = features[most_important_idx]
-                direction = "lower" if coefs[most_important_idx] < 0 else "higher"
-                
-                if most_important == 'avg_throw':
-                    st.info(f"💡 A {direction} average score per throw significantly increases win probability!")
-                elif most_important == 'current_score':
-                    st.info(f"💡 A {direction} remaining score significantly increases win probability!")
-                elif most_important == 'total_throws':
-                    st.info(f"💡 A {direction} number of throws significantly increases win probability!")
-                elif most_important == 'max_throw':
-                    st.info(f"💡 A {direction} maximum throw value significantly increases win probability!")
-                    
         # Comparison to professional players
         st.write("## 🧠 Compare Yourself to a Pro")
  
-        import requests
-        
         # Real pro player data via Sportradar API (trial plan uses competitor endpoint)
         pro_player = "Michael van Gerwen"
         pro_competitor_id = "sr:competitor:26280"  # MvG's competitor ID
