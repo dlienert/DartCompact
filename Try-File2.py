@@ -1,0 +1,606 @@
+import matplotlib
+matplotlib.use("Agg")  # Use non-interactive backend for Streamlit # Helps with stability of the app
+import matplotlib.pyplot as plt
+import streamlit as st
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+import numpy as np
+import requests
+st.set_page_config(page_title="DartCompact 🎯", layout="centered")
+
+# Create the sidebar for ML model information first so it's always visible
+with st.sidebar:
+    st.title("🧠 ML Model")
+    
+    # Always show game counter
+    if 'game_count' not in st.session_state:
+        st.session_state.game_count = 0
+        
+    st.write(f"Games played: {st.session_state.game_count}")
+    
+    # Debug info about ML data
+    if 'ml_data' in st.session_state:
+        st.write(f"ML data points: {len(st.session_state.ml_data)}")
+    else:
+        st.write("ML data not initialized yet")
+        
+    # Show ML model status
+    if 'ml_model' in st.session_state:
+        st.success("ML model is trained and ready!")
+    elif st.session_state.game_count >= 2:
+        st.warning("ML model should be trained but isn't. Try playing another game.")
+    else:
+        st.info("Play at least 2 games to train the ML model")
+        
+    # ML prediction display if model exists
+    if 'ml_model' in st.session_state and 'game_count' in st.session_state and st.session_state.game_count >= 2:
+        try:
+            # Display ML model info
+            st.markdown("## 🧠 ML Model Stats")
+            st.info(f"Model trained on {len(st.session_state.ml_data)} data points from {st.session_state.game_count} games")
+            
+            if 'players' in st.session_state and len(st.session_state.players) > 0:
+                # Show data collected for each player
+                player_stats = st.session_state.ml_data.groupby('player').agg({
+                    'won': 'sum',
+                    'avg_throw': 'mean',
+                    'total_throws': 'sum',
+                    'max_throw': 'max'
+                }).reset_index()
+                
+                with st.expander("View Player Statistics"):
+                    st.dataframe(player_stats)
+            
+            # Win predictions section
+            st.markdown("## 🤖 Win Predictions")
+            
+            # Show predictions for all players if in game
+            if 'players' in st.session_state and len(st.session_state.players) > 0 and 'scores' in st.session_state:
+                st.write("### All Players Win Probability")
+                
+                # Calculate win probability for each player
+                win_probs = []
+                
+                for player_name in st.session_state.players:
+                    if player_name in st.session_state.throws and len(st.session_state.throws[player_name]) > 0:
+                        player_throws = st.session_state.throws[player_name]
+                        current_score = st.session_state.scores[player_name]
+                        
+                        x_pred = pd.DataFrame([{
+                            'avg_throw': sum(player_throws) / len(player_throws),
+                            'total_throws': len(player_throws),
+                            'current_score': current_score,
+                            'max_throw': max(player_throws) if player_throws else 0
+                        }])
+                        
+                        try:
+                            proba = st.session_state.ml_model.predict_proba(x_pred)[0][1]
+                            win_probs.append((player_name, proba))
+                        except:
+                            win_probs.append((player_name, 0))
+                
+                # Sort by probability (highest first)
+                win_probs.sort(key=lambda x: x[1], reverse=True)
+                
+                # Create a DataFrame for the chart
+                prob_df = pd.DataFrame(win_probs, columns=['Player', 'Win Probability'])
+                
+                # Display as bar chart
+                st.bar_chart(prob_df.set_index('Player'))
+                
+                # Display as table with colored background
+                st.write("### Player Win Probabilities")
+                
+                for player, prob in win_probs:
+                    color = f"rgba(0, {int(255 * prob)}, 0, 0.3)"
+                    st.markdown(
+                        f"""
+                        <div style="background-color: {color}; padding: 10px; border-radius: 5px; margin-bottom: 5px;">
+                            <strong>{player}</strong>: {prob*100:.1f}% chance of winning
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                
+                # Highlight current player
+                if 'turn' in st.session_state:
+                    current_player = st.session_state.players[st.session_state.turn]
+                    st.markdown(f"### 🎮 Current Player: {current_player}")
+                    
+                    # Find probability for current player
+                    current_prob = next((prob for player, prob in win_probs if player == current_player), 0)
+                    
+                    # Show current player's probability with gauge
+                    st.markdown(f"### Win Probability: {current_prob*100:.1f}%")
+                    st.progress(current_prob)
+                    
+                    # What-if analysis for current player
+                    st.markdown("### 📊 What if you score...")
+                    
+                    player_throws = st.session_state.throws[current_player]
+                    current_score = st.session_state.scores[current_player]
+                    
+                    if current_score > 0 and len(player_throws) > 0:
+                        avg_throw = sum(player_throws) / len(player_throws)
+                        max_throw = max(player_throws) if player_throws else 0
+                        total_throws = len(player_throws)
+                        
+                        # Predict for different potential scores
+                        scenarios = [
+                            ("Low score (20)", 20),
+                            ("Average score", int(avg_throw)),
+                            ("Good score (40)", 40),
+                            ("Great score (60)", 60),
+                            ("Perfect throw (180)", 180) # for what are those scores (low, good, great)
+                        ]
+                        
+                        scenario_probs = []
+                        
+                        for label, score in scenarios:
+                            # Don't go below zero
+                            new_score = max(0, current_score - score)
+                            
+                            x_pred = pd.DataFrame([{
+                                'avg_throw': ((avg_throw * total_throws) + score) / (total_throws + 1),
+                                'total_throws': total_throws + 1,
+                                'current_score': new_score,
+                                'max_throw': max(max_throw, score)
+                            }])
+                            
+                            try:
+                                new_prob = st.session_state.ml_model.predict_proba(x_pred)[0][1]
+                                scenario_probs.append((label, new_prob))
+                            except:
+                                scenario_probs.append((label, 0))
+                        
+                        # Display scenario probabilities
+                        scenario_df = pd.DataFrame(scenario_probs, columns=['Scenario', 'Win Probability'])
+                        st.bar_chart(scenario_df.set_index('Scenario'))
+        except Exception as e:
+            st.warning(f"Could not generate prediction: {str(e)}")
+            st.write("Exception details:", e)
+
+
+# game_logic.py start
+
+
+
+# === Logic of the game ===
+def create_players(players_names):
+    return [{"name": name, "score": 301, "history": [], "victories": 0} for name in players_names]
+
+def process_turn(player, throws):
+    total_score = sum(throws)
+    new_score = player['score'] - total_score
+
+    # ML process (Initialising ML data)
+    if 'ml_data' not in st.session_state:
+        st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    
+    # ✅ Add throws in historic 
+    player['history'].append(throws)
+
+    if new_score < 0:
+        message = "Bust! You overpassed your score."
+        new_score = player['score']  #Score stays the same if the player busts
+        game_over = False
+    else:
+        message = f"Remaining score: {new_score} points"
+        game_over = new_score == 0  #Player wins if score == 0
+
+    player['score'] = new_score
+    return game_over, new_score, message
+
+
+# game_logic.py end
+
+#dart_compact.py start
+
+
+# Multi-player dart game using Streamlit for name input, avatars, and score tracking.
+
+
+st.title("🎯 DartCompact")
+st.write("Welcome to the compact dart game for multiple players!!!")
+
+# Initialize players and game state
+if "players" not in st.session_state:
+    st.session_state.players = []  # Player names
+    st.session_state.scores = {}  # Player scores
+    st.session_state.winner = None  # Game winner
+    st.session_state.game_started = False  # Game status
+    st.session_state.game_count = 0  # Initialize game counter
+    
+# Initialize ML data if not present
+if 'ml_data' not in st.session_state:
+    st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+
+# Ensure game_count is always initialized
+if 'game_count' not in st.session_state:
+    st.session_state.game_count = 0
+    
+# Game setup UI
+if not st.session_state.game_started:
+    num_players = st.number_input("Number of players", min_value=1, max_value=8, step=1)  # Player count
+    require_double_out = st.checkbox("Require double to win", value=True)  # Double Out Rule
+    starting_score = st.selectbox("Select starting score", [101, 301, 501], index=1)  # Starting score
+
+    player_names = []  # Player names list
+    avatars = {}  # Player avatars dictionary
+    options = ["Kim", "Alexis", "Robyn", "Billie", "Lou", "Charlie"]  # Avatar options
+
+    # Input for player names and avatars
+    for i in range(num_players):
+        name = st.text_input(f"Name of Player {i+1}", key=f"name_{i}")
+        player_names.append(name)
+
+    for i, name in enumerate(player_names):
+        avatar_choice = st.radio(f"Choose avatar for Player {i+1}", options=options, horizontal=True, key=f"avatar_choice_{i}")
+        avatar_url = f"https://api.dicebear.com/7.x/adventurer/svg?seed={avatar_choice}_default"
+        st.image(avatar_url, width=100)  # Display avatar
+        avatars[name] = avatar_url  # Map name to avatar URL
+    st.session_state.avatars = avatars  # Store avatars
+
+    # Start game logic
+    if st.button("Start Game"):
+        if all(name.strip() != "" for name in player_names):  # Check names
+            st.session_state.players = player_names  # Store names
+            st.session_state.scores = {name: starting_score for name in player_names}  # Initialize scores
+            st.session_state.throws = {name: [] for name in player_names}  # Track throws
+            st.session_state.turn = 0  # Initialize turn
+            st.session_state.game_started = True  # Mark game started
+            st.session_state.require_double_out = require_double_out  # Store rule preference
+            
+            # Increment game counter
+            if 'game_count' not in st.session_state:
+                st.session_state.game_count = 1
+            else:
+                st.session_state.game_count += 1
+                
+            st.success(f"Starting game #{st.session_state.game_count}")
+            
+            # Initialize ML data if not present
+            if 'ml_data' not in st.session_state:
+                st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+                
+            # Try to train the model if we have at least 2 games
+            if st.session_state.game_count >= 2:
+                # Train ML model if we have enough data
+                try:
+                    df = st.session_state.ml_data
+                    if len(df) >= 10 and len(set(df['won'])) > 1:  # Need at least some data points and both win/loss cases
+                        expected_cols = ['avg_throw', 'total_throws', 'current_score', 'max_throw']
+                        X = df[expected_cols].apply(pd.to_numeric, errors='coerce')
+                        y = df['won'].astype(int)
+                        model = LogisticRegression(solver='liblinear')
+                        model.fit(X, y)
+                        st.session_state.ml_model = model
+                        st.success("ML model trained successfully!")
+                except Exception as e:
+                    st.error(f"Error training ML model: {e}")
+                
+            st.rerun()  # Refresh UI
+        else:
+            st.warning("Please fill in all player names.")  # Warning for missing names
+
+else:
+    # Initialize throw tracking
+    if "has_thrown" not in st.session_state:
+        st.session_state.has_thrown = False
+
+    # Get current player data for ML
+    player_name = st.session_state.players[st.session_state.turn]
+    player_throws = st.session_state.throws[player_name]
+    current_score = st.session_state.scores[player_name]
+    
+    # Track player performance for ML
+    if len(player_throws) > 0:
+        player_data = {
+            'player': player_name,
+            'avg_throw': sum(player_throws) / len(player_throws) if player_throws else 0,
+            'total_throws': len(player_throws),
+            'current_score': current_score,
+            'max_throw': max(player_throws) if player_throws else 0,
+            'won': 0  # Will be updated to 1 if player wins
+        }
+        # Add to ML dataset
+        st.session_state.ml_data = pd.concat([st.session_state.ml_data, pd.DataFrame([player_data])], ignore_index=True)
+
+    # Game over logic
+    if st.session_state.winner:
+        st.success(f"🏆 {st.session_state.winner} has won the game!")
+        
+        if 'winner_processed' not in st.session_state:
+            st.session_state.winner_processed = True
+            
+            # Ensure game_count is properly recorded
+            if 'game_count' not in st.session_state:
+                st.session_state.game_count = 1
+                
+            # Train ML model with updated win data
+            try:
+                df = st.session_state.ml_data
+                if len(df) >= 10 and len(set(df['won'])) > 1:
+                    expected_cols = ['avg_throw', 'total_throws', 'current_score', 'max_throw']
+                    X = df[expected_cols].apply(pd.to_numeric, errors='coerce')
+                    y = df['won'].astype(int)
+                    model = LogisticRegression(solver='liblinear')
+                    model.fit(X, y)
+                    st.session_state.ml_model = model
+                    st.success("ML model trained successfully!")
+            except Exception as e:
+                st.error(f"Error training ML model: {e}")
+
+        # Create final ranking sorted by remaining score
+        winner = st.session_state.winner
+        others = [p for p in st.session_state.players if p != winner]
+        others_sorted = sorted(others, key=lambda p: st.session_state.scores[p])
+        ranking = [winner] + others_sorted
+
+        st.markdown("## 🏅 Final Standings")
+        # Displays winnwers from left to right
+        podium_cols = st.columns([1, 1, 1])
+        podium_order = [0, 1, 2]  #show 1st, 2nd, 3rd left to right
+
+        for idx, pos in enumerate(podium_order):
+            if pos < len(ranking): # check if there are enough players
+                player = ranking[pos]
+                with podium_cols[idx]:
+                    if pos == 0:
+                        st.markdown("🥇 **1st Place**")
+                    elif pos == 1:
+                        st.markdown("🥈 **2nd Place**")
+                    elif pos == 2:
+                        st.markdown("🥉 **3rd Place**")
+                    st.image(st.session_state.avatars[player], width=100) #shows the avatar
+                    st.markdown(f"### {player}") #shows the name of the player
+        
+        # Statistics below podium
+        st.write("## 📊 Game Statistics")
+        stats_data = {"Players": [], "Average Points": [], "Max Points": []}
+
+        for player, throws in st.session_state.throws.items():
+            stats_data["Players"].append(player)
+            stats_data["Average Points"].append(sum(throws)/len(throws) if throws else 0)
+            stats_data["Max Points"].append(max(throws) if throws else 0)
+
+        stats_df = pd.DataFrame(stats_data).set_index("Players")
+        st.write("### Average Points per Throw")
+        st.bar_chart(stats_df["Average Points"])
+        st.write("### Max Points in a Single Throw")
+        st.bar_chart(stats_df["Max Points"])
+        
+        # Display ML insights if model exists
+        if 'ml_model' in st.session_state and len(st.session_state.ml_data) > 5:
+            st.markdown("## 🧠 ML Model Insights")
+            
+            # Get all player data
+            all_players = list(set(st.session_state.ml_data['player'].values))
+            
+            # If there's enough data, show historical win rates
+            player_stats = st.session_state.ml_data.groupby('player').agg({
+                'won': 'sum',
+                'avg_throw': 'mean',
+                'total_throws': 'sum',
+                'max_throw': 'max'
+            }).reset_index()
+            
+            # Calculate games played per player
+            games_per_player = {}
+            for player in all_players:
+                games_per_player[player] = len(set(st.session_state.ml_data[st.session_state.ml_data['player'] == player].index))
+            
+            # Display stats
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.write("### Player Performance")
+                
+                # Format data for display
+                display_df = player_stats.copy()
+                display_df['win_rate'] = (display_df['won'] / [games_per_player.get(p, 1) for p in display_df['player']]) * 100
+                display_df = display_df.rename(columns={
+                    'won': 'Wins',
+                    'avg_throw': 'Avg Score',
+                    'total_throws': 'Total Throws',
+                    'max_throw': 'Best Throw',
+                    'win_rate': 'Win Rate %'
+                })
+                display_df = display_df[['player', 'Wins', 'Win Rate %', 'Avg Score', 'Best Throw']]
+                display_df = display_df.set_index('player')
+                
+                st.dataframe(display_df)
+            
+            with col2:
+                st.write("### Win Probability Comparison")
+                
+                # Calculate win probability for each player's typical performance
+                win_probs = []
+                
+                for _, row in player_stats.iterrows():
+                    player = row['player']
+                    avg = row['avg_throw']
+                    total = row['total_throws']
+                    max_score = row['max_throw']
+                    
+                    # Use average stats to predict
+                    x_pred = pd.DataFrame([{
+                        'avg_throw': avg,
+                        'total_throws': 20,  # Standardized value
+                        'current_score': 50,  # Standardized value
+                        'max_throw': max_score
+                    }])
+                    
+                    try:
+                        proba = st.session_state.ml_model.predict_proba(x_pred)[0][1]
+                        win_probs.append((player, proba))
+                    except:
+                        win_probs.append((player, 0))
+                
+                # Sort by probability
+                win_probs.sort(key=lambda x: x[1], reverse=True)
+                
+                # Create a DataFrame for the chart
+                prob_df = pd.DataFrame(win_probs, columns=['Player', 'Win Probability'])
+                st.bar_chart(prob_df.set_index('Player'))
+            
+        # Comparison to professional players
+        st.write("## 🧠 Compare Yourself to a Pro")
+ 
+        # Real pro player data via Sportradar API (trial plan uses competitor endpoint)
+        pro_player = "Michael van Gerwen"
+        pro_competitor_id = "sr:competitor:26280"  # MvG's competitor ID
+        API_KEY = "0j9Nj7DIbdznIAKdz6LPFnHWmYChwGUQgboXO76n"
+        
+        try:
+            url = f"https://api.sportradar.com/darts/trial/v2/en/competitors/{pro_competitor_id}/profile.json?api_key={API_KEY}"
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                # Attempt to extract actual stats if available in response
+                stats = data.get("statistics", {})
+                pro_avg = stats.get("average_3_dart_score", 98.5)
+                pro_max = stats.get("best_3_dart_score", 180) # has to be changed to 60? then not best 3 dart score
+            else:
+                st.warning("Couldn't fetch pro data, using defaults.")
+        except Exception as e:
+            st.error("API call failed.")
+ 
+        for player, throws in st.session_state.throws.items():
+            user_avg = sum(throws)/len(throws) if throws else 0
+            user_max = max(throws) if throws else 0
+ 
+            st.markdown(f"### {player} vs {pro_player}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric(label="🎯 Your Avg", value=round(user_avg, 1))
+                st.metric(label="🔥 Your Max Throw", value=user_max)
+            with col2:
+                st.metric(label="🏆 Pro Avg", value=pro_avg)
+                st.metric(label="🚀 Pro Max Throw", value=pro_max)
+ 
+            # Visual comparison bar
+            percent_of_pro = min(user_avg / pro_avg, 1.0)
+            st.progress(percent_of_pro)
+    else:
+        current_player = st.session_state.players[st.session_state.turn]  # Current player
+        st.image(st.session_state.avatars[current_player], width=100, caption=f"{current_player}'s Avatar")
+        st.subheader(f"{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}")
+
+        # Track last turn
+        if "last_turn" not in st.session_state:
+            st.session_state.last_turn = -1
+
+        # Reset state if turn changed
+        if st.session_state.turn != st.session_state.last_turn:
+            st.session_state.pop(f"base_score_{current_player}", None)
+            st.session_state.pop(f"multiplier_{current_player}", None)
+            st.session_state.last_turn = st.session_state.turn
+            st.session_state.has_thrown = False
+            if "throw_count" not in st.session_state:
+                st.session_state.throw_count = 0
+
+        # Throw confirmation logic
+        with st.form(key=f"{current_player}_throw_form_{st.session_state.throw_count}", clear_on_submit=True):
+            base_score = st.selectbox(
+                "Base Score",
+                [0] + [i for i in range(1, 21)] + [25, 50],
+                key=f"base_score_{current_player}_{st.session_state.throw_count}"
+            )
+            multiplier = st.radio(
+                "Multiplier",
+                ["Single", "Double", "Triple"],
+                horizontal=True,
+                key=f"multiplier_{current_player}_{st.session_state.throw_count}"
+            )
+            submitted = st.form_submit_button("Confirm Throw")
+
+        if submitted and not st.session_state.has_thrown:
+            # Validate score rules
+            if base_score in [25, 50] and multiplier in ["Double", "Triple"]:
+                st.info("Double or Triple is not allowed on 25 or 50. Defaulting to Single.")
+                multiplier = "Single"
+
+            # Calculate points
+            points = base_score
+            if multiplier == "Double":
+                points *= 2
+            elif multiplier == "Triple":
+                points *= 3
+
+            # Update score and handle overshoot or win
+            current_score = st.session_state.scores[current_player]
+            new_score = current_score - points
+
+            if new_score < 0:
+                st.info("Overshoot! Score remains the same.")
+                st.session_state.throws[current_player].append(0)  # Record a zero for the overshoot
+                st.session_state.throw_count += 1
+                if st.session_state.throw_count >= 3:
+                    st.session_state.has_thrown = True
+            elif new_score == 0:
+                if st.session_state.require_double_out and multiplier != "Double":
+                    st.info("You need to finish on a Double to win!")
+                    st.session_state.throws[current_player].append(0)  # Record a zero for invalid finish
+                    st.session_state.throw_count += 1
+                    if st.session_state.throw_count >= 3:
+                        st.session_state.has_thrown = True
+                else:
+                    st.session_state.scores[current_player] = 0
+                    st.session_state.winner = current_player
+                    st.session_state.throws[current_player].append(points)
+                    
+                    # Update winner in ML data - find the most recent entry for this player
+                    winner_entries = st.session_state.ml_data[st.session_state.ml_data['player'] == current_player]
+                    if not winner_entries.empty:
+                        last_entry_idx = winner_entries.index[-1]
+                        st.session_state.ml_data.at[last_entry_idx, 'won'] = 1
+                    
+                    st.session_state.has_thrown = True
+                    st.rerun()  # Update UI immediately to show win
+            else:
+                st.session_state.scores[current_player] = new_score
+                st.session_state.throws[current_player].append(points)
+                st.session_state.throw_count += 1
+                if st.session_state.throw_count >= 3:
+                    st.session_state.has_thrown = True
+            
+            # Only rerun if we haven't already set has_thrown to True
+            if not st.session_state.has_thrown:
+                st.rerun()
+
+        # Turn switching logic
+        if st.session_state.has_thrown:
+            if st.button("Next Turn"):
+                st.session_state.turn = (st.session_state.turn + 1) % len(st.session_state.players)  # Next player
+                st.session_state.has_thrown = False  # Reset throw status
+                st.session_state.throw_count = 0
+                current_player = st.session_state.players[st.session_state.turn]
+                st.session_state.pop(f"base_score_{current_player}", None)  # Clear selections
+                st.session_state.pop(f"multiplier_{current_player}", None)
+                st.rerun()  # Refresh UI
+
+# Restart behavior
+if st.button("Restart Game"):
+    # Save ML data and game count before reset
+    saved_ml_data = st.session_state.ml_data.copy() if 'ml_data' in st.session_state else pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    saved_game_count = st.session_state.game_count if 'game_count' in st.session_state else 0
+    saved_ml_model = st.session_state.ml_model if 'ml_model' in st.session_state else None
+    
+    # Clear session except for ML data
+    keys_to_keep = ['ml_data', 'game_count', 'ml_model']
+    keys_to_clear = [k for k in st.session_state.keys() if k not in keys_to_keep]
+    
+    for key in keys_to_clear:
+        del st.session_state[key]
+    
+    # Ensure ML data is preserved
+    st.session_state.ml_data = saved_ml_data
+    st.session_state.game_count = saved_game_count
+    if saved_ml_model is not None:
+        st.session_state.ml_model = saved_ml_model
+        
+    st.success(f"Game reset! You've played {saved_game_count} games so far.")
+    st.rerun()
+
+# dart_compact.py end
