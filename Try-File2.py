@@ -1,6 +1,6 @@
 # Import required libraries
 import matplotlib  # Library for creating visualizations
-matplotlib.use("Agg")  # Use non-interactive backend for Streamlit - helps with app stability
+matplotlib.use('Agg')  # Use non-interactive backend for Streamlit - helps with app stability
 import matplotlib.pyplot as plt  # For creating charts and plots
 import streamlit as st  # The web app framework
 import pandas as pd  # For data manipulation and analysis
