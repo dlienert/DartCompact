@@ -11,7 +11,7 @@ import requests  # For making HTTP requests to external APIs
 # Configure the Streamlit page
 st.set_page_config(page_title="DartCompact 🎯", layout="centered")
 
-# === GAME LOGIC FUNCTIONS ===
+# Game logic functions 
 
 def create_players(players_names):
     """Create a list of player dictionaries with initial values"""
@@ -53,7 +53,8 @@ def process_turn(player, throws):
 st.title("🎯 DartCompact")
 st.write("Welcome to the compact dart game for multiple players!")
 
-# === SESSION STATE INITIALIZATION ===
+# Session state initialisation
+
 # Initialize session state variables only once (when the app first loads)
 if "players" not in st.session_state:
     st.session_state.players = []  # List to store player names
@@ -64,7 +65,8 @@ if "players" not in st.session_state:
     # DataFrame to store player performance data for ML prediction
     st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
     
-# === GAME SETUP UI ===
+# Game setup ui
+
 # Show setup UI when no game is in progress
 if not st.session_state.game_started:
     # Input for selecting number of players (1-8)
@@ -97,7 +99,8 @@ if not st.session_state.game_started:
     # Save all avatars to session state
     st.session_state.avatars = avatars
 
-    # === GAME START BUTTON AND LOGIC ===
+    # Game start button and logic 
+    
     if st.button("Start Game"):
         # Validate that all players have names
         if all(name.strip() != "" for name in player_names):
@@ -113,7 +116,8 @@ if not st.session_state.game_started:
             st.session_state.game_count += 1
             st.success(f"Starting game #{st.session_state.game_count}")
             
-            # === ML MODEL TRAINING ===
+            # ML model training 
+            
             # Try to train ML model if we have enough games and data
             if st.session_state.game_count >= 2:
                 try:
@@ -139,7 +143,8 @@ if not st.session_state.game_started:
             st.warning("Please fill in all player names.")
 
 else:
-    # === GAME PLAY UI ===
+    # Game play ui
+    
     # Initialize throw tracking variables if needed
     if "has_thrown" not in st.session_state:
         st.session_state.has_thrown = False  # Tracks if current player completed their throws
@@ -151,7 +156,8 @@ else:
     player_throws = st.session_state.throws[player_name]  # Get throw history for this player
     current_score = st.session_state.scores[player_name]  # Get current score for this player
     
-    # === ML DATA COLLECTION ===
+    # ML data collection
+    
     # Only track ML data after player has made at least one throw (to avoid empty data)
     if player_throws:
         # Create data point with player's current performance metrics
@@ -166,7 +172,8 @@ else:
         # Add to ML dataset for training
         st.session_state.ml_data = pd.concat([st.session_state.ml_data, pd.DataFrame([player_data])], ignore_index=True)
 
-    # === GAME OVER SCREEN ===
+    # Game over screen
+    
     # Check if we have a winner and display end-game UI
     if st.session_state.winner:
         # Show winner announcement
@@ -176,7 +183,8 @@ else:
         if 'winner_processed' not in st.session_state:
             st.session_state.winner_processed = True  # Flag to prevent re-processing
             
-            # === ML MODEL UPDATE WITH WINNER DATA ===
+            # ML model update with winner data
+            
             # Train ML model with the updated winner information
             try:
                 df = st.session_state.ml_data
@@ -194,7 +202,8 @@ else:
             except Exception as e:
                 st.error(f"Error training ML model: {e}")
 
-        # === FINAL STANDINGS ===
+        # Final standings 
+        
         # Create player ranking for final standings
         winner = st.session_state.winner  # Get winner's name
         others = [p for p in st.session_state.players if p != winner]  # All other players
@@ -220,7 +229,8 @@ else:
                     st.image(st.session_state.avatars[player], width=100)
                     st.markdown(f"### {player}")
         
-        # === GAME STATISTICS ===
+        # Game statistics
+        
         # Show game statistics for all players
         st.write("## 📊 Game Statistics")
         stats_data = {"Players": [], "Average Points": [], "Max Points": []}
@@ -243,7 +253,8 @@ else:
             st.write("### Max Points in a Single Throw")
             st.bar_chart(stats_df["Max Points"])
         
-        # === ML MODEL INSIGHTS ===
+        # ML model insights
+        
         # Display ML insights if model exists and we have enough data
         if 'ml_model' in st.session_state and len(st.session_state.ml_data) > 5:
             st.markdown("## 🧠 ML Model Insights")
@@ -259,8 +270,9 @@ else:
                 'max_throw': 'max'  # Maximum throw score
             }).reset_index()
             
-            # === PLAYER PERFORMANCE STATS ===
-            st.write("### Player Performance")
+            # Player performance stats
+            
+            st.write("### Player performance")
             
             # Extract win counts for each player
             win_counts = {row['player']: row['won'] for _, row in player_stats.iterrows()}
@@ -306,8 +318,9 @@ else:
             else:
                 st.write("No player statistics available yet.")
         
-        # === PRO PLAYER COMPARISON ===
-        st.write("## 🧠 Compare Yourself to a Pro")
+        # Pro player comparison
+        
+        st.write("## Compare yourself to a Pro")
         # Pro player details
         pro_player = "Michael van Gerwen"  # Famous professional dart player
         pro_competitor_id = "sr:competitor:26280"  # API ID for this player
@@ -363,7 +376,8 @@ else:
                     # Show percentage text
                     st.caption(f"You're at {percent_of_pro*100:.1f}% of professional level")
     
-    # === ACTIVE GAME UI ===
+    # Active game ui 
+    
     # Show game interface for current player when game is in progress (no winner yet)
     else:
         # Get current player information
@@ -387,7 +401,8 @@ else:
             st.session_state.has_thrown = False
             st.session_state.throw_count = 0
 
-        # === THROW INPUT FORM ===
+        # Throw input form
+        
         # Form for player to input their throw details
         with st.form(key=f"{current_player}_throw_form_{st.session_state.throw_count}", clear_on_submit=True):
             # Base score selection (dart board numbers)
@@ -406,7 +421,8 @@ else:
             # Submit button
             submitted = st.form_submit_button("Confirm Throw")
 
-        # === THROW PROCESSING ===
+        # Throw processing 
+        
         # Process the throw if form was submitted and turn is not complete
         if submitted and not st.session_state.has_thrown:
             # Validate dart rules: 25 and 50 can only be hit as singles (no double/triple bulls)
@@ -421,7 +437,8 @@ else:
             current_score = st.session_state.scores[current_player]
             new_score = current_score - points  # Subtract points from current score
 
-            # === SCORE SCENARIOS ===
+            # Score scenarios 
+            
             # Handle bust (score below 0)
             if new_score < 0:
                 st.info("Overshoot! Score remains the same.")
@@ -469,7 +486,8 @@ else:
             if not st.session_state.has_thrown:
                 st.rerun()
 
-        # === NEXT TURN BUTTON ===
+        # Next turn button 
+        
         # Show next turn button when current player has completed their throws
         if st.session_state.has_thrown:
             if st.button("Next Turn"):
@@ -486,7 +504,8 @@ else:
                 # Refresh UI for next player
                 st.rerun()
 
-# === RESTART GAME BUTTON ===
+# Restart game button
+
 # Button to restart the game while preserving ML data
 if st.button("Restart Game"):
     # Save important data before clearing session state
