@@ -1,145 +1,234 @@
 # Import required libraries
-import matplotlib  # Library for creating visualizations
-matplotlib.use('Agg')  # Use non-interactive backend for Streamlit - helps with app stability
-import matplotlib.pyplot as plt  # For creating charts and plots
-import streamlit as st  # The web app framework
-import pandas as pd  # For data manipulation and analysis
-import numpy as np  # For numerical operations
-from sklearn.linear_model import LogisticRegression  # ML model for win prediction
-import requests  # For making HTTP requests to external APIs
+import matplotlib  # Library for creating data visualizations and charts
+matplotlib.use('Agg')  # Force matplotlib to use non-interactive 'Agg' backend - necessary for Streamlit to avoid conflicts with its rendering system
+import matplotlib.pyplot as plt  # Import the pyplot module specifically, which provides MATLAB-like plotting interface for creating charts
+import streamlit as st  # Import Streamlit, the web app framework that turns data scripts into shareable web apps
+import pandas as pd  # Import pandas for data manipulation - provides DataFrame objects that make data analysis easier
+import numpy as np  # Import numpy for numerical operations - needed for array manipulations and mathematical functions
+from sklearn.linear_model import LogisticRegression  # Import LogisticRegression for win/loss prediction - chosen because it works well for binary classification
+import requests  # Import requests library to make HTTP calls to external APIs (used for fetching pro player data)
 
-# Configure the Streamlit page
-st.set_page_config(page_title='DartCompact 🎯', layout='centered')
+# Configure the Streamlit page settings - must be called before any other Streamlit function
+st.set_page_config(
+    page_title='DartCompact 🎯',  # Set browser tab title with dart emoji for branding
+    layout='centered'  # Use centered layout (vs 'wide') for better readability on various devices
+)
 
-# Game logic functions 
+# Game logic functions - These functions handle the core dart game mechanics
 
 def create_players(players_names):
     """Create a list of player dictionaries with initial values"""
-    # For each player name, create a dictionary with default values
+    # Using list comprehension for efficiency - creates a dictionary for each player in a single line
+    # Dictionary structure with multiple properties enables easy tracking of various player attributes
+    # - name: Player's display name (string)
+    # - score: Starting score (301 is standard for casual darts)
+    # - history: Empty list that will store throw history for analysis
+    # - victories: Counter for total wins (for potential future feature)
     return [{'name': name, 'score': 301, 'history': [], 'victories': 0} for name in players_names]
 
 def process_turn(player, throws):
     """Process a player's turn and update their score based on throws"""
-    # Sum up all the points from this turn's throws
-    total_score = sum(throws)
-    # Calculate new score by subtracting points
-    new_score = player['score'] - total_score
-
-    # Make sure ML data structure exists in session state
-    if 'ml_data' not in st.session_state:
-        st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    # Calculate total points for this turn by summing all throw values
+    total_score = sum(throws)  # Using sum() is more concise than manual addition in a loop
     
-    # Record this turn's throws in player history
+    # Calculate new score by subtracting current turn's points from player's current score
+    # Dart scoring is subtractive - players start with a score and decrease to zero
+    new_score = player['score'] - total_score
+    
+    # Make sure ML data structure exists in session state
+    # This check prevents errors if the function is called before ML structure initialization
+    if 'ml_data' not in st.session_state:
+        # Create empty DataFrame with specific columns for ML training data
+        # Column structure designed to capture relevant features for win prediction
+        st.session_state.ml_data = pd.DataFrame(columns=[
+            'player',        # Player name (string) - for grouping and identification
+            'avg_throw',     # Average throw score (float) - key predictor of skill
+            'total_throws',  # Total number of throws (int) - measures experience in this game
+            'current_score', # Remaining score (int) - proximity to winning
+            'max_throw',     # Best throw (int) - indicator of peak performance
+            'won'            # Whether player won (binary) - target variable for ML
+        ])
+    
+    # Record this turn's throws in player history for later analysis
+    # Append to the list rather than overwriting to maintain complete game history
     player['history'].append(throws)
-
-    # Handle different scoring scenarios
+    
+    # Handle different scoring scenarios according to dart rules
     if new_score < 0:
-        # Player busted (went below 0) - score doesn't change
-        message = 'Bust! You overpassed your score.'
-        new_score = player['score']  # Score stays the same if the player busts
-        game_over = False
+        # BUST case: Player went below zero (overshoot scenario)
+        message = 'Bust! You overpassed your score.'  # Informative message for player
+        new_score = player['score']  # Score stays the same if the player busts - standard dart rule
+        game_over = False  # Game continues after a bust
     else:
-        # Normal scoring situation
-        message = f'Remaining score: {new_score} points'
-        # Check if player won (exactly hit zero)
-        game_over = new_score == 0  # Player wins if score == 0
-
-    # Update player's score with the new value
+        # Normal scoring case or potential win
+        message = f'Remaining score: {new_score} points'  # Feedback on remaining points
+        game_over = new_score == 0  # Game is over only when score is exactly zero - standard dart rule
+    
+    # Update player's score in the player object
+    # Must be done after all checks to avoid premature score updates
     player['score'] = new_score
-    # Return whether game is over, new score, and message to display
+    
+    # Return multiple values as a tuple for flexibility in the calling code
+    # - game_over: Boolean flag to indicate if player has won
+    # - new_score: Updated score for display and further game logic
+    # - message: Feedback text to show the player
     return game_over, new_score, message
 
 # Multi-player dart game using Streamlit for name input, avatars, and score tracking
-st.title('🎯 DartCompact')
-st.write('Welcome to the compact dart game for multiple players!')
+# Each section of the app is clearly separated for maintenance and readability
+
+# App title and welcome message
+st.title('🎯 DartCompact')  # Use an emoji in the title for visual appeal and quick recognition
+st.write('Welcome to the compact dart game for multiple players!')  # Brief welcome message explains app purpose
 
 # Session state initialisation
+# Streamlit's session_state persists variables between reruns - essential for game state management
 
 # Initialize session state variables only once (when the app first loads)
+# This conditional check prevents resetting variables on page reloads, which would lose game state
 if 'players' not in st.session_state:
-    st.session_state.players = []  # List to store player names
-    st.session_state.scores = {}   # Dictionary to track scores for each player
-    st.session_state.winner = None  # Will store the winner's name when game ends
-    st.session_state.game_started = False  # Flag to track if a game is in progress
-    st.session_state.game_count = 0  # Counter for total games played
-    # DataFrame to store player performance data for ML prediction
-    st.session_state.ml_data = pd.DataFrame(columns=['player', 'avg_throw', 'total_throws', 'current_score', 'max_throw', 'won'])
+    # All key game state variables are initialized here to avoid "key not found" errors later
+    st.session_state.players = []  # List to store player names - empty until game setup
+    st.session_state.scores = {}   # Dictionary mapping player names to scores - empty until game setup
+    st.session_state.winner = None  # Will store winner's name when someone wins - None indicates no winner yet
+    st.session_state.game_started = False  # Flag to control UI flow - False shows setup screen, True shows game UI
+    st.session_state.game_count = 0  # Counter for total completed games - used for statistics and ML training
     
-# Game setup ui
+    # DataFrame to store player performance data for ML training
+    # Using pandas DataFrame for ML data offers flexible data manipulation capabilities
+    # Empty DataFrame with predefined columns ensures consistent data structure
+    st.session_state.ml_data = pd.DataFrame(columns=[
+        'player',        # Player identification 
+        'avg_throw',     # Average points per throw - measures consistency
+        'total_throws',  # Number of throws made - measures game progress
+        'current_score', # Remaining score - measures proximity to winning
+        'max_throw',     # Maximum points scored in a single throw - measures skill ceiling
+        'won'            # Binary outcome (0/1) - target variable for ML model
+    ])
 
+# Game setup UI
+# This section is only shown when no game is in progress (game_started = False)
+# Contains all the inputs needed to configure and start a new game
+    
 # Show setup UI when no game is in progress
 if not st.session_state.game_started:
     # Input for selecting number of players (1-8)
+    # number_input provides integer selection with increment buttons
+    # min_value=1 ensures at least one player, max_value=8 prevents overcrowding
     num_players = st.number_input('Number of players', min_value=1, max_value=8, step=1)
+    
     # Toggle for requiring a double to win (standard darts rule)
+    # checkbox provides a simple boolean toggle with default=True
+    # This implements the standard "double-out" rule in darts where players must hit a double to win
     require_double_out = st.checkbox('Require double to win', value=True)
+    
     # Select starting score (standard options in darts)
+    # selectbox provides a dropdown with predefined options
+    # 301 is selected by default (index=1) as it's the most common format for casual games
     starting_score = st.selectbox('Select starting score', [101, 301, 501], index=1)
 
-    # Initialize arrays for player data
-    player_names = []  # Will hold the names entered by user
-    avatars = {}  # Will map player names to their avatar URLs
+    # Initialize arrays for player data collection
+    player_names = []  # Will hold the names entered by user - separate from session state until game starts
+    avatars = {}  # Will map player names to their avatar URLs - for visual player identification
+    
     # Available avatar options (using Dicebear API)
+    # Limited options make selection simpler and ensure consistency
     options = ['Kim', 'Alexis', 'Robyn', 'Billie', 'Lou', 'Charlie']
 
     # Create text inputs for each player's name
+    # Loop generates the right number of input fields based on num_players selection
     for i in range(num_players):
+        # text_input creates a single-line text field for name entry
+        # Unique key prevents conflicts when multiple inputs exist
         name = st.text_input(f'Name of Player {i+1}', key=f'name_{i}')
-        player_names.append(name)
+        player_names.append(name)  # Add to temporary list until game starts
 
     # Let each player select an avatar
+    # Separate loop from name entry to ensure all names are collected first
     for i, name in enumerate(player_names):
+        # radio creates a set of mutually exclusive options with horizontal layout
+        # Each player gets their own set of options with a unique key
         avatar_choice = st.radio(f'Choose avatar for Player {i+1}', options=options, horizontal=True, key=f'avatar_choice_{i}')
+        
         # Generate avatar URL using dicebear API
+        # This free API generates consistent avatars based on the seed value
+        # Using _default suffix ensures consistent style across avatars
         avatar_url = f'https://api.dicebear.com/7.x/adventurer/svg?seed={avatar_choice}_default'
-        # Display avatar preview
+        
+        # Display avatar preview so players can see their selection
+        # width=100 keeps the avatar reasonably sized on the page
         st.image(avatar_url, width=100)
-        # Store avatar URL for this player
+        
+        # Store avatar URL in dictionary, mapped to player name
+        # This creates {name: url} pairs for easy retrieval during gameplay
         avatars[name] = avatar_url
-    # Save all avatars to session state
+        
+    # Save all avatars to session state for use throughout the game
+    # Doing this here ensures all avatars are set before the game starts
     st.session_state.avatars = avatars
 
     # Game start button and logic 
-    
+    # Button that triggers game initialization when clicked
     if st.button('Start Game'):
         # Validate that all players have names
+        # This prevents starting a game with unnamed players, which would cause issues
         if all(name.strip() != '' for name in player_names):
-            # Initialize game state
-            st.session_state.players = player_names  # Store player names
-            st.session_state.scores = {name: starting_score for name in player_names}  # Set starting scores
-            st.session_state.throws = {name: [] for name in player_names}  # Initialize throw history
-            st.session_state.turn = 0  # First player's turn
-            st.session_state.game_started = True  # Mark game as started
+            # Store finalized player data in session state
+            st.session_state.players = player_names  # List of player names in turn order
+            st.session_state.scores = {name: starting_score for name in player_names}  # Initial scores dictionary
+            st.session_state.throws = {name: [] for name in player_names}  # Empty throw history for each player
+            st.session_state.turn = 0  # First player's turn (index 0)
+            st.session_state.game_started = True  # Flag game as started to switch to game UI
             st.session_state.require_double_out = require_double_out  # Store double-out rule setting
             
-            # Update game counter
+            # Update game counter for statistics tracking
+            # Increment rather than set to ensure accurate count across multiple games
             st.session_state.game_count += 1
-            st.success(f'Starting game #{st.session_state.game_count}')
+            st.success(f'Starting game #{st.session_state.game_count}')  # Success message with game number
             
-            # ML model training 
-            
-            # Try to train ML model if we have enough games and data
+            # ML model training
+            # Only train model if we have at least 2 games of data
+            # This ensures enough data points for meaningful patterns
             if st.session_state.game_count >= 2:
                 try:
+                    # Get all collected ML data from previous games
                     df = st.session_state.ml_data
-                    # Need at least 10 data points and both win/loss outcomes
+                    
+                    # Only train if we have enough data and examples of both outcomes
+                    # Need at least 10 data points for minimal statistical significance
+                    # Need both positive and negative cases (won=0, won=1) for classification
                     if len(df) >= 10 and len(set(df['won'])) > 1:
                         # Prepare features (X) and target (y)
+                        # Apply pd.to_numeric to ensure all features are properly converted to numbers
+                        # errors='coerce' handles any non-numeric values by converting them to NaN
                         X = df[['avg_throw', 'total_throws', 'current_score', 'max_throw']].apply(pd.to_numeric, errors='coerce')
+                        
+                        # Convert target to integer type (0 or 1) for binary classification
                         y = df['won'].astype(int)
-                        # Train logistic regression model
+                        
+                        # Create and train logistic regression model
+                        # LogisticRegression is used because:
+                        # 1. It works well for binary classification (win/lose)
+                        # 2. It can provide probability estimates
+                        # 3. It's relatively simple and interpretable
+                        # solver='liblinear' is good for small datasets
                         model = LogisticRegression(solver='liblinear')
-                        model.fit(X, y)
-                        # Store trained model
+                        model.fit(X, y)  # Train model with features and target
+                        
+                        # Store trained model in session state for later use
                         st.session_state.ml_model = model
-                        st.success('ML model trained successfully!')
+                        st.success('ML model trained successfully!')  # Success message
                 except Exception as e:
+                    # Catch and display any errors during training
+                    # This prevents crashes if something goes wrong with the ML process
                     st.error(f'Error training ML model: {e}')
                 
             # Refresh UI to show game interface
+            # rerun() is more reliable than update() for complete UI refresh
             st.rerun()
         else:
             # Show warning if any player name is empty
+            # This prevents starting a game with unnamed players
             st.warning('Please fill in all player names')
 
 else:
@@ -184,8 +273,6 @@ else:
             st.session_state.winner_processed = True  # Flag to prevent re-processing
             
             # ML model update with winner data
-            
-            # Train ML model with the updated winner information
             try:
                 df = st.session_state.ml_data
                 # Need sufficient data and both win/loss examples to train
@@ -230,7 +317,7 @@ else:
                     st.markdown(f'### {player}')
         
         # Game statistics
-        
+
         # Show game statistics for all players
         st.write('## 📊 Game Statistics')
         stats_data = {'Players': [], 'Average Points': [], 'Max Points': []}
@@ -374,7 +461,7 @@ else:
                     # Display progress bar showing comparison
                     st.progress(percent_of_pro)
                     # Show percentage text
-                    st.caption(f'You're at {percent_of_pro*100:.1f}% of professional level')
+                    st.caption(f"You're at {percent_of_pro*100:.1f}% of professional level")
     
     # Active game ui 
     
@@ -383,8 +470,8 @@ else:
         # Get current player information
         current_player = st.session_state.players[st.session_state.turn]
         # Display player avatar and current score
-        st.image(st.session_state.avatars[current_player], width=100, caption=f'{current_player}'s Avatar')
-        st.subheader(f'{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}')
+        st.image(st.session_state.avatars[current_player], width=100, caption=f"{current_player}'s Avatar")
+        st.subheader(f"{current_player}'s turn – Current Score: {st.session_state.scores[current_player]}")
 
         # Track player turns to reset state when player changes
         if 'last_turn' not in st.session_state:
@@ -422,7 +509,7 @@ else:
             submitted = st.form_submit_button('Confirm Throw')
 
         # Throw processing 
-        
+
         # Process the throw if form was submitted and turn is not complete
         if submitted and not st.session_state.has_thrown:
             # Validate dart rules: 25 and 50 can only be hit as singles (no double/triple bulls)
@@ -438,7 +525,7 @@ else:
             new_score = current_score - points  # Subtract points from current score
 
             # Score scenarios 
-            
+
             # Handle bust (score below 0)
             if new_score < 0:
                 st.info('Overshoot! Your score remains the same')
@@ -530,6 +617,6 @@ if st.button('Restart Game'):
         st.session_state.ml_model = saved_ml_model
         
     # Show success message with game count
-    st.success(f'Game reset! You've played {saved_game_count} games so far.')
+    st.success(f"Game reset! You've played {saved_game_count} games so far.")
     # Refresh UI to show setup screen
     st.rerun()
