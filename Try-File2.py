@@ -118,9 +118,9 @@ if not st.session_state.game_started:
     num_players = st.number_input('Number of players', min_value=1, max_value=8, step=1)
     
     # Toggle for requiring a double to win (standard darts rule)
-    # checkbox provides a simple boolean toggle with default=True
+    # checkbox provides a simple boolean toggle with default=False
     # This implements the standard "double-out" rule in darts where players must hit a double to win
-    require_double_out = st.checkbox('Require double to win', value=True)
+    require_double_out = st.checkbox('Require double to win', value=False)
     
     # Select starting score (standard options in darts)
     # selectbox provides a dropdown with predefined options
